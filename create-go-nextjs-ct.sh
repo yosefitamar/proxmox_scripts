@@ -106,33 +106,21 @@ list_used_vmids() {
 }
 is_vmid_free() { list_used_vmids | grep -qx "$1" && return 1 || return 0; }
 list_templates() {
-  # Usa `pveam list <storage>` que funciona apenas em storages que suportam
-  # o content type vztmpl (ex: local). Ignora storages como local-lvm.
-  local node; node=$(get_node)
-  pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null \
-    | grep -o '"storage":"[^"]*"' | cut -d'"' -f4 \
-    | while read -r s; do
-        # Verifica se o storage suporta vztmpl antes de listar
-        local content
-        content=$(pvesh get /nodes/"$node"/storage/"$s" \
-          --output-format json 2>/dev/null | grep -o '"content":"[^"]*"' | cut -d'"' -f4)
-        [[ "$content" != *"vztmpl"* ]] && continue
-        pveam list "$s" 2>/dev/null \
-          | awk 'NR>1 {print $1}' \
-          | grep -v '^$'
-      done
+  # Tenta pveam list em cada storage; ignora os que nao suportam vztmpl.
+  local node s
+  node=$(get_node)
+  while IFS= read -r s; do
+    pveam list "$s" 2>/dev/null | awk 'NR>1 && $1!="" {print $1}'
+  done < <(pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null     | grep -o '"storage":"[^"]*"' | cut -d'"' -f4)
 }
 list_storages() {
-  # Retorna apenas storages que suportam rootdir/images (para criar CTs)
-  local node; node=$(get_node)
-  pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null \
-    | grep -o '"storage":"[^"]*"' | cut -d'"' -f4 \
-    | while read -r s; do
-        local content
-        content=$(pvesh get /nodes/"$node"/storage/"$s" \
-          --output-format json 2>/dev/null | grep -o '"content":"[^"]*"' | cut -d'"' -f4)
-        [[ "$content" == *"rootdir"* ]] && echo "$s"
-      done
+  # Retorna storages com suporte a rootdir (disco de CT).
+  local node s json
+  node=$(get_node)
+  while IFS= read -r s; do
+    json=$(pvesh get /nodes/"$node"/storage/"$s" --output-format json 2>/dev/null)
+    [[ "$json" == *"rootdir"* ]] && echo "$s"
+  done < <(pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null     | grep -o '"storage":"[^"]*"' | cut -d'"' -f4)
 }
 
 # ── Selecao: VMID ─────────────────────────────────────────────────────────────
@@ -219,34 +207,27 @@ select_template() {
 
   if (( ${#templates[@]} == 0 )); then
     warn "Nenhum template encontrado. Buscando Debian 12 no repositorio..."
-    # Usa o primeiro storage que suporte vztmpl
-    local tmpl_storage
-    tmpl_storage=$(
-      local node; node=$(get_node)
-      pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null \
-        | grep -o '"storage":"[^"]*"' | cut -d'"' -f4 \
-        | while read -r s; do
-            local c
-            c=$(pvesh get /nodes/"$node"/storage/"$s" \
-              --output-format json 2>/dev/null | grep -o '"content":"[^"]*"' | cut -d'"' -f4)
-            if [[ "$c" == *"vztmpl"* ]]; then echo "$s"; break; fi
-          done
-    )
-    [[ -z "$tmpl_storage" ]] && die "Nenhum storage com suporte a templates (vztmpl) encontrado."
+    # Usa pveam list para achar o primeiro storage com templates
+    local tmpl_storage s_node
+    s_node=$(get_node)
+    tmpl_storage=""
+    while IFS= read -r s; do
+      if pveam list "$s" &>/dev/null; then
+        tmpl_storage="$s"
+        break
+      fi
+    done < <(pvesh get /nodes/"$s_node"/storage --output-format json 2>/dev/null       | grep -o '"storage":"[^"]*"' | cut -d'"' -f4)
+    [[ -z "$tmpl_storage" ]] && die "Nenhum storage com suporte a templates encontrado."
 
     pveam update &>/dev/null
 
-    # Pega o nome exato do template Debian 12 mais recente disponivel no repo
+    # Nome exato do Debian 12 mais recente no repositorio
     local tmpl_name
-    tmpl_name=$(pveam available --section system 2>/dev/null \
-      | awk '{print $2}' \
-      | grep '^debian-12' \
-      | sort -V | tail -1)
+    tmpl_name=$(pveam available --section system 2>/dev/null       | awk '{print $2}' | grep '^debian-12' | sort -V | tail -1)
     [[ -z "$tmpl_name" ]] && die "Nao foi possivel encontrar template Debian 12 no repositorio."
 
     info "Baixando ${tmpl_name} em ${tmpl_storage}..."
-    pveam download "$tmpl_storage" "$tmpl_name" \
-      || die "Falha ao baixar template."
+    pveam download "$tmpl_storage" "$tmpl_name"       || die "Falha ao baixar template."
     templates=("${tmpl_storage}:vztmpl/${tmpl_name}")
   fi
 
