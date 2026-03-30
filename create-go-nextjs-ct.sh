@@ -106,24 +106,29 @@ list_used_vmids() {
 }
 is_vmid_free() { list_used_vmids | grep -qx "$1" && return 1 || return 0; }
 list_templates() {
-  # Tenta pveam list em cada storage; ignora os que nao suportam vztmpl.
-  local node s
+  # Filtra storages com "vztmpl" no campo content via /nodes/<node>/storage
+  local node
   node=$(get_node)
-  while IFS= read -r s; do
-    pveam list "$s" 2>/dev/null | awk 'NR>1 && $1!="" {print $1}'
-  done < <(pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null     | grep -o '"storage":"[^"]*"' | cut -d'"' -f4)
+  pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null     | python3 -c "
+import sys, json
+for s in json.load(sys.stdin):
+    if 'vztmpl' in s.get('content',''):
+        print(s['storage'])
+" | while IFS= read -r s; do
+      pveam list "$s" 2>/dev/null | awk 'NR>1 && $1!="" {print $1}'
+    done
 }
 list_storages() {
-  # Retorna storages com suporte a rootdir (disco de CT).
-  local node s json
+  # Filtra storages com "rootdir" no campo content (suportam disco de CT)
+  local node
   node=$(get_node)
-  while IFS= read -r s; do
-    json=$(pvesh get /nodes/"$node"/storage/"$s" --output-format json 2>/dev/null)
-    [[ "$json" == *"rootdir"* ]] && echo "$s"
-  done < <(pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null     | grep -o '"storage":"[^"]*"' | cut -d'"' -f4)
+  pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null     | python3 -c "
+import sys, json
+for s in json.load(sys.stdin):
+    if 'rootdir' in s.get('content',''):
+        print(s['storage'])
+"
 }
-
-# ── Selecao: VMID ─────────────────────────────────────────────────────────────
 select_vmid() {
   local suggestion used
   suggestion=$(get_next_vmid)
@@ -207,21 +212,19 @@ select_template() {
 
   if (( ${#templates[@]} == 0 )); then
     warn "Nenhum template encontrado. Buscando Debian 12 no repositorio..."
-    # Usa pveam list para achar o primeiro storage com templates
-    local tmpl_storage s_node
-    s_node=$(get_node)
-    tmpl_storage=""
-    while IFS= read -r s; do
-      if pveam list "$s" &>/dev/null; then
-        tmpl_storage="$s"
-        break
-      fi
-    done < <(pvesh get /nodes/"$s_node"/storage --output-format json 2>/dev/null       | grep -o '"storage":"[^"]*"' | cut -d'"' -f4)
+    local tmpl_storage
+    tmpl_storage=$(
+      pvesh get /nodes/"$(get_node)"/storage --output-format json 2>/dev/null         | python3 -c "
+import sys, json
+for s in json.load(sys.stdin):
+    if 'vztmpl' in s.get('content',''):
+        print(s['storage']); break
+"
+    )
     [[ -z "$tmpl_storage" ]] && die "Nenhum storage com suporte a templates encontrado."
 
     pveam update &>/dev/null
 
-    # Nome exato do Debian 12 mais recente no repositorio
     local tmpl_name
     tmpl_name=$(pveam available --section system 2>/dev/null       | awk '{print $2}' | grep '^debian-12' | sort -V | tail -1)
     [[ -z "$tmpl_name" ]] && die "Nao foi possivel encontrar template Debian 12 no repositorio."
