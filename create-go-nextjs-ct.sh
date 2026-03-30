@@ -154,11 +154,13 @@ select_vmid() {
 # ── Selecao: Hostname ──────────────────────────────────────────────────────────
 select_name() {
   echo ""
+  info "Hostname aceita apenas letras, numeros e hifen (sem underscore)."
   while true; do
     ask "Hostname da CT:"; read -r nome
-    [[ -n "$nome" ]]               || { warn "Nome vazio."; continue; }
-    [[ ! "$nome" =~ [[:space:]] ]] || { warn "Sem espacos."; continue; }
-    (( ${#nome} <= 63 ))           || { warn "Maximo 63 caracteres."; continue; }
+    [[ -n "$nome" ]]                          || { warn "Nome vazio."; continue; }
+    (( ${#nome} <= 63 ))                      || { warn "Maximo 63 caracteres."; continue; }
+    [[ "$nome" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$ ]] \
+      || { warn "Formato invalido. Use apenas letras, numeros e hifen. Nao pode comecar ou terminar com hifen."; continue; }
     CT_HOSTNAME="$nome"
     ok "Hostname: ${CT_HOSTNAME}"
     break
@@ -382,7 +384,16 @@ provision_ct() {
   echo ""
 
   pct exec "${CT_VMID}" -- bash -euo pipefail << PROVISION
+# ── Locale (evita warnings de perl/apt-listchanges) ──────────────────────────
 export DEBIAN_FRONTEND=noninteractive
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+export LANGUAGE=C.UTF-8
+
+# Garante que o locale C.UTF-8 esta disponivel e configurado na CT
+echo 'C.UTF-8 UTF-8' >> /etc/locale.gen 2>/dev/null || true
+locale-gen C.UTF-8 &>/dev/null || true
+update-locale LANG=C.UTF-8 LC_ALL=C.UTF-8 &>/dev/null || true
 
 echo "[1/6] Atualizando pacotes..."
 apt-get update -qq && apt-get upgrade -y -qq
