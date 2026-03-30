@@ -21,6 +21,7 @@
 # ==============================================================================
 
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
 
 # ─── Cores e helpers ─────────────────────────────────────────────────────────
 
@@ -57,7 +58,7 @@ step "1/7  Corrigindo locale (pt_BR.UTF-8)"
 
 # Instala locales se não estiver presente
 apt-get update -qq
-apt-get install -y -qq locales > /dev/null 2>&1
+apt-get install -y -qq locales || fail "Falha ao instalar locales"
 
 # Gera os locales necessários
 sed -i 's/^# *pt_BR.UTF-8/pt_BR.UTF-8/' /etc/locale.gen 2>/dev/null || true
@@ -86,8 +87,8 @@ ok "Locale configurado: pt_BR.UTF-8"
 step "2/7  Atualizando pacotes do sistema"
 
 apt-get update -qq
-apt-get upgrade -y -qq > /dev/null 2>&1
-apt-get dist-upgrade -y -qq > /dev/null 2>&1
+apt-get upgrade -y -qq || warn "Alguns pacotes não puderam ser atualizados"
+apt-get dist-upgrade -y -qq || warn "dist-upgrade parcial"
 
 ok "Sistema atualizado"
 
@@ -101,15 +102,13 @@ BASIC_PKGS=(
     wget
     ca-certificates
     gnupg
-    lsb-release
-    apt-transport-https
-    software-properties-common
     jq
     unzip
     bash-completion
 )
 
-apt-get install -y -qq "${BASIC_PKGS[@]}" > /dev/null 2>&1
+export DEBIAN_FRONTEND=noninteractive
+apt-get install -y -qq "${BASIC_PKGS[@]}" || fail "Falha ao instalar pacotes básicos"
 
 ok "Ferramentas instaladas: ${BASIC_PKGS[*]}"
 
@@ -153,7 +152,7 @@ DOCKER_PKGS=(
     docker-compose-plugin
 )
 
-apt-get install -y -qq "${DOCKER_PKGS[@]}" > /dev/null 2>&1
+apt-get install -y -qq "${DOCKER_PKGS[@]}" || fail "Falha ao instalar Docker"
 
 # Habilita e inicia o Docker
 systemctl enable docker --now > /dev/null 2>&1 || true
@@ -195,7 +194,7 @@ ok "daemon.json configurado com log rotation e live-restore"
 
 step "6/7  Configurando UFW (portas 22, 80, 443)"
 
-apt-get install -y -qq ufw > /dev/null 2>&1
+apt-get install -y -qq ufw || fail "Falha ao instalar UFW"
 
 # Reset silencioso para garantir estado limpo
 ufw --force reset > /dev/null 2>&1
