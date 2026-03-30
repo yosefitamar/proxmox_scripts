@@ -106,18 +106,33 @@ list_used_vmids() {
 }
 is_vmid_free() { list_used_vmids | grep -qx "$1" && return 1 || return 0; }
 list_templates() {
+  # Usa `pveam list <storage>` que funciona apenas em storages que suportam
+  # o content type vztmpl (ex: local). Ignora storages como local-lvm.
   local node; node=$(get_node)
   pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null \
     | grep -o '"storage":"[^"]*"' | cut -d'"' -f4 \
     | while read -r s; do
-        pvesh get /nodes/"$node"/storage/"$s"/content \
-          --output-format json 2>/dev/null \
-          | grep -o '"volid":"[^"]*tar[^"]*"' | cut -d'"' -f4
+        # Verifica se o storage suporta vztmpl antes de listar
+        local content
+        content=$(pvesh get /nodes/"$node"/storage/"$s" \
+          --output-format json 2>/dev/null | grep -o '"content":"[^"]*"' | cut -d'"' -f4)
+        [[ "$content" != *"vztmpl"* ]] && continue
+        pveam list "$s" 2>/dev/null \
+          | awk 'NR>1 {print $1}' \
+          | grep -v '^$'
       done
 }
 list_storages() {
-  pvesh get /nodes/"$(get_node)"/storage --output-format json 2>/dev/null \
-    | grep -o '"storage":"[^"]*"' | cut -d'"' -f4
+  # Retorna apenas storages que suportam rootdir/images (para criar CTs)
+  local node; node=$(get_node)
+  pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null \
+    | grep -o '"storage":"[^"]*"' | cut -d'"' -f4 \
+    | while read -r s; do
+        local content
+        content=$(pvesh get /nodes/"$node"/storage/"$s" \
+          --output-format json 2>/dev/null | grep -o '"content":"[^"]*"' | cut -d'"' -f4)
+        [[ "$content" == *"rootdir"* ]] && echo "$s"
+      done
 }
 
 # ── Selecao: VMID ─────────────────────────────────────────────────────────────
@@ -203,12 +218,36 @@ select_template() {
   done < <(list_templates)
 
   if (( ${#templates[@]} == 0 )); then
-    warn "Nenhum template encontrado. Baixando Debian 12..."
-    local storage; storage=$(list_storages | head -1)
+    warn "Nenhum template encontrado. Buscando Debian 12 no repositorio..."
+    # Usa o primeiro storage que suporte vztmpl
+    local tmpl_storage
+    tmpl_storage=$(
+      local node; node=$(get_node)
+      pvesh get /nodes/"$node"/storage --output-format json 2>/dev/null \
+        | grep -o '"storage":"[^"]*"' | cut -d'"' -f4 \
+        | while read -r s; do
+            local c
+            c=$(pvesh get /nodes/"$node"/storage/"$s" \
+              --output-format json 2>/dev/null | grep -o '"content":"[^"]*"' | cut -d'"' -f4)
+            if [[ "$c" == *"vztmpl"* ]]; then echo "$s"; break; fi
+          done
+    )
+    [[ -z "$tmpl_storage" ]] && die "Nenhum storage com suporte a templates (vztmpl) encontrado."
+
     pveam update &>/dev/null
-    pveam download "$storage" debian-12-standard_12.7-1_amd64.tar.zst \
+
+    # Pega o nome exato do template Debian 12 mais recente disponivel no repo
+    local tmpl_name
+    tmpl_name=$(pveam available --section system 2>/dev/null \
+      | awk '{print $2}' \
+      | grep '^debian-12' \
+      | sort -V | tail -1)
+    [[ -z "$tmpl_name" ]] && die "Nao foi possivel encontrar template Debian 12 no repositorio."
+
+    info "Baixando ${tmpl_name} em ${tmpl_storage}..."
+    pveam download "$tmpl_storage" "$tmpl_name" \
       || die "Falha ao baixar template."
-    templates=("${storage}:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst")
+    templates=("${tmpl_storage}:vztmpl/${tmpl_name}")
   fi
 
   if (( ${#templates[@]} == 1 )); then
