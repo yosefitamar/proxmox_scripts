@@ -34,7 +34,7 @@ NC='\033[0m'
 log() {
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${BLUE}[${timestamp}]${NC} $1"
+    echo -e "${BLUE}[${timestamp}]${NC} $1" > /dev/tty
     echo "[${timestamp}] $(echo "$1" | sed 's/\x1b\[[0-9;]*m//g')" >> "$LOG_FILE"
 }
 
@@ -51,7 +51,7 @@ log_err() {
 }
 
 log_step() {
-    echo ""
+    echo "" > /dev/tty
     log "${CYAN}${BOLD}>>> $1${NC}"
 }
 
@@ -61,23 +61,23 @@ ask() {
     local default="${3:-}"
 
     if [ -n "$default" ]; then
-        echo -en "${YELLOW}${prompt} [${default}]: ${NC}"
+        echo -en "${YELLOW}${prompt} [${default}]: ${NC}" > /dev/tty
     else
-        echo -en "${YELLOW}${prompt}: ${NC}"
+        echo -en "${YELLOW}${prompt}: ${NC}" > /dev/tty
     fi
 
-    read -r input
-    eval "$var_name=\"${input:-$default}\""
+    read -r input < /dev/tty
+    printf -v "$var_name" '%s' "${input:-$default}"
 }
 
 ask_password() {
     local prompt="$1"
     local var_name="$2"
 
-    echo -en "${YELLOW}${prompt}: ${NC}"
-    read -rs input
-    echo ""
-    eval "$var_name=\"$input\""
+    echo -en "${YELLOW}${prompt}: ${NC}" > /dev/tty
+    read -rs input < /dev/tty
+    echo "" > /dev/tty
+    printf -v "$var_name" '%s' "$input"
 }
 
 ask_yesno() {
@@ -85,12 +85,12 @@ ask_yesno() {
     local default="${2:-s}"
 
     if [ "$default" = "s" ]; then
-        echo -en "${YELLOW}${prompt} [S/n]: ${NC}"
+        echo -en "${YELLOW}${prompt} [S/n]: ${NC}" > /dev/tty
     else
-        echo -en "${YELLOW}${prompt} [s/N]: ${NC}"
+        echo -en "${YELLOW}${prompt} [s/N]: ${NC}" > /dev/tty
     fi
 
-    read -r input
+    read -r input < /dev/tty
     input="${input:-$default}"
     [[ "$input" =~ ^[sS]$ ]]
 }
@@ -104,13 +104,15 @@ check_root() {
 
 # --- Inicio ------------------------------------------------------------------
 
-clear
-echo -e "${BOLD}"
-echo "  ============================================"
-echo "    Belia Admin — Setup de Producao"
-echo "    Belia Software"
-echo "  ============================================"
-echo -e "${NC}"
+clear > /dev/tty
+cat <<BANNER > /dev/tty
+$(echo -e "${BOLD}")
+  ============================================
+    Belia Admin — Setup de Producao
+    Belia Software
+  ============================================
+$(echo -e "${NC}")
+BANNER
 
 # Inicia log
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -241,24 +243,24 @@ else
 fi
 
 if [ "$CONFIGURE_ENV" = true ]; then
-    echo ""
-    echo -e "${BOLD}  Configuracao do banco de dados (PostgreSQL)${NC}"
+    echo "" > /dev/tty
+    echo -e "${BOLD}  Configuracao do banco de dados (PostgreSQL)${NC}" > /dev/tty
     ask "  Host do PostgreSQL" DB_HOST "192.168.100.41"
     ask "  Porta" DB_PORT "5432"
     ask "  Nome do banco" DB_NAME "belia_admin"
     ask "  Usuario" DB_USER "postgres"
     ask_password "  Senha do banco" DB_PASSWORD
 
-    echo ""
-    echo -e "${BOLD}  Configuracao da aplicacao${NC}"
+    echo "" > /dev/tty
+    echo -e "${BOLD}  Configuracao da aplicacao${NC}" > /dev/tty
     ask "  Porta da API (backend)" APP_PORT "3010"
     ask_password "  JWT Secret (minimo 32 caracteres)" JWT_SECRET
     ask "  URL do Redis" REDIS_URL "redis://redis:6379"
     ask "  CORS Origins (URL do frontend)" CORS_ORIGINS "https://admin.beliasoftware.com"
     ask "  URL publica da API (para o frontend)" NEXT_PUBLIC_API_URL "https://api-admin.beliasoftware.com"
 
-    echo ""
-    echo -e "${BOLD}  Configuracao de integracao (deixe vazio para desabilitar)${NC}"
+    echo "" > /dev/tty
+    echo -e "${BOLD}  Configuracao de integracao (deixe vazio para desabilitar)${NC}" > /dev/tty
     ask "  CT201 Host (Mishpat tenant host)" CT201_HOST ""
     ask "  CT201 SSH User" CT201_SSH_USER "root"
     ask "  CT201 SSH Key path" CT201_SSH_KEY "/root/.ssh/id_ed25519"
@@ -423,20 +425,22 @@ APP_PORT="${APP_PORT:-3010}"
 FE_PORT="3011"
 HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 
-echo ""
-echo -e "${BOLD}  ============================================"
-echo "    Setup concluido!"
-echo "  ============================================${NC}"
-echo ""
-echo -e "  ${CYAN}Backend API:${NC}   http://${HOST_IP}:${APP_PORT}"
-echo -e "  ${CYAN}Frontend:${NC}      http://${HOST_IP}:${FE_PORT}"
-echo -e "  ${CYAN}Diretorio:${NC}     ${INSTALL_DIR}"
-echo -e "  ${CYAN}Log do setup:${NC}  ${LOG_FILE}"
-echo ""
-echo -e "  ${BOLD}Comandos uteis:${NC}"
-echo -e "  ${GREEN}$INSTALL_DIR/update.sh${NC}             — Atualizar (git pull + rebuild)"
-echo -e "  ${GREEN}systemctl status ${SERVICE_NAME}${NC}     — Ver status do servico"
-echo -e "  ${GREEN}docker compose -f $COMPOSE_FILE logs -f${NC} — Ver logs"
-echo -e "  ${GREEN}docker compose -f $COMPOSE_FILE ps${NC}     — Ver containers"
-echo ""
+cat <<SUMMARY > /dev/tty
+
+$(echo -e "${BOLD}")  ============================================
+    Setup concluido!
+  ============================================$(echo -e "${NC}")
+
+  $(echo -e "${CYAN}")Backend API:$(echo -e "${NC}")   http://${HOST_IP}:${APP_PORT}
+  $(echo -e "${CYAN}")Frontend:$(echo -e "${NC}")      http://${HOST_IP}:${FE_PORT}
+  $(echo -e "${CYAN}")Diretorio:$(echo -e "${NC}")     ${INSTALL_DIR}
+  $(echo -e "${CYAN}")Log do setup:$(echo -e "${NC}")  ${LOG_FILE}
+
+  $(echo -e "${BOLD}")Comandos uteis:$(echo -e "${NC}")
+  $(echo -e "${GREEN}")$INSTALL_DIR/update.sh$(echo -e "${NC}")             — Atualizar (git pull + rebuild)
+  $(echo -e "${GREEN}")systemctl status ${SERVICE_NAME}$(echo -e "${NC}")     — Ver status do servico
+  $(echo -e "${GREEN}")docker compose -f $COMPOSE_FILE logs -f$(echo -e "${NC}") — Ver logs
+  $(echo -e "${GREEN}")docker compose -f $COMPOSE_FILE ps$(echo -e "${NC}")     — Ver containers
+
+SUMMARY
 log_ok "Setup finalizado com sucesso!"
