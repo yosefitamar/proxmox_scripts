@@ -4,10 +4,17 @@
 # Configura um CT/servidor do zero para rodar o Belia Admin
 #
 # Uso:
-#   curl -fsSL https://raw.githubusercontent.com/SEU_USER/belia_admin/main/scripts/setup-belia-admin.sh | bash
-#   ou
-#   wget -qO- https://raw.githubusercontent.com/SEU_USER/belia_admin/main/scripts/setup-belia-admin.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/yosefitamar/proxmox_scripts/main/setup-belia-admin.sh | bash
 # =============================================================================
+
+# Se o script esta sendo lido de um pipe (curl | bash), salva em arquivo
+# temporario e re-executa. Isso evita conflitos de stdin com read/heredocs.
+if [ ! -t 0 ]; then
+    TMPSCRIPT=$(mktemp /tmp/belia-admin-setup.XXXXXX.sh)
+    cat > "$TMPSCRIPT"
+    chmod +x "$TMPSCRIPT"
+    exec bash "$TMPSCRIPT"
+fi
 
 set -euo pipefail
 
